@@ -25,10 +25,13 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.Parcel;
 import android.text.TextUtils;
+import android.telephony.CellInfo;
 import android.telephony.Rlog;
 
 import com.android.internal.telephony.uicc.IccCardApplicationStatus;
 import com.android.internal.telephony.uicc.IccCardStatus;
+import com.android.internal.telephony.dataconnection.DcFailCause;
+import com.android.internal.telephony.dataconnection.DataCallResponse;
 
 import java.util.ArrayList;
 
@@ -48,34 +51,35 @@ public class HTCQualcommRIL extends RIL implements CommandsInterface {
     }
 
     @Override
-    protected Object
-    responseIccCardStatus(Parcel p) {
-        Object ret;
+    protected DataCallResponse getDataCallResponse(Parcel p, int version) {
+        DataCallResponse dataCall = new DataCallResponse();
 
-        boolean extraIccCardStates = needsOldRilFeature("extraicccardstates");
-
-        if (extraIccCardStates) {
-            int dataPosition = p.dataPosition();
-            int cardState = p.readInt();
-
-            if (cardState >= 3) {
-                ret = responseVoid(p);
-            } else {
-                p.setDataPosition(dataPosition);
-                ret = super.responseIccCardStatus(p);
-            }
-        } else {
-            ret = super.responseIccCardStatus(p);
+        dataCall.version = version;
+        dataCall.status = p.readInt();
+        dataCall.suggestedRetryTime = p.readInt();
+        dataCall.cid = p.readInt();
+        dataCall.active = p.readInt();
+        dataCall.type = p.readString();
+        dataCall.ifname = p.readString();
+        /* Check dataCall.active != 0 so address, dns, gateways are provided
+         * when switching LTE<->3G<->2G */
+        if ((dataCall.status == DcFailCause.NONE.getErrorCode()) &&
+                TextUtils.isEmpty(dataCall.ifname) && dataCall.active != 0) {
+            throw new RuntimeException("getDataCallResponse, no ifname");
         }
-
-        // force CDMA + LTE network mode
-        boolean forceCdmaLte = needsOldRilFeature("forceCdmaLteNetworkType");
-
-        if (forceCdmaLte) {
-            setPreferredNetworkType(NETWORK_MODE_LTE_CDMA_EVDO, null);
+        String addresses = p.readString();
+        if (!TextUtils.isEmpty(addresses)) {
+            dataCall.addresses = addresses.split(" ");
         }
-
-        return ret;
+        String dnses = p.readString();
+        if (!TextUtils.isEmpty(dnses)) {
+            dataCall.dnses = dnses.split(" ");
+        }
+        String gateways = p.readString();
+        if (!TextUtils.isEmpty(gateways)) {
+            dataCall.gateways = gateways.split(" ");
+        }
+        return dataCall;
     }
 
     @Override
@@ -132,6 +136,7 @@ public class HTCQualcommRIL extends RIL implements CommandsInterface {
                 }
                 setPreferredNetworkType(mPreferredNetworkType, null);
                 setCdmaSubscriptionSource(mCdmaSubscription, null);
+                setCellInfoListRate(Integer.MAX_VALUE, null);
                 notifyRegistrantsRilConnectionChanged(((int[])ret)[0]);
                 break;
             }
