@@ -54,6 +54,7 @@ import android.telephony.SmsMessage.SubmitPdu;
 import android.telephony.TelephonyManager;
 import android.text.Html;
 import android.text.Spanned;
+import android.text.TextUtils;
 import android.util.EventLog;
 import android.util.Log;
 import android.telephony.Rlog;
@@ -77,6 +78,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.HashMap;
 import java.util.List;
@@ -161,6 +163,8 @@ public abstract class SMSDispatcher extends Handler {
 
     protected final WapPushOverSms mWapPush;
 
+    private final MockSmsReceiver mMockSmsReceiver;
+
     protected static final Uri mRawUri = Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, "raw");
 
     /** Maximum number of times to retry sending a failed SMS. */
@@ -228,6 +232,10 @@ public abstract class SMSDispatcher extends Handler {
         mContext.getContentResolver().registerContentObserver(Settings.Global.getUriFor(
                 Settings.Global.SMS_SHORT_CODE_RULE), false, mSettingsObserver);
 
+        // Register the mock SMS receiver to simulate the reception of SMS
+        mMockSmsReceiver = new MockSmsReceiver();
+        mMockSmsReceiver.registerReceiver();
+
         createWakelock();
 
         mSmsCapable = mContext.getResources().getBoolean(
@@ -284,6 +292,7 @@ public abstract class SMSDispatcher extends Handler {
     @Override
     protected void finalize() {
         Rlog.d(TAG, "SMSDispatcher finalized");
+        mMockSmsReceiver.unregisterReceiver();
     }
 
 
@@ -1656,8 +1665,14 @@ public abstract class SMSDispatcher extends Handler {
                             AppOpsManager.OP_RECEIVE_SMS);
                 }
 
+                // Set result (messages were sent)
+                setResultCode(android.app.Activity.RESULT_OK);
+
             } catch (Exception ex) {
                 Log.e(TAG, "Failed to dispatch SMS", ex);
+
+                // Set result (messages were not sent)
+                setResultCode(android.app.Activity.RESULT_CANCELED);
             }
         }
 
