@@ -18,7 +18,6 @@ package com.android.internal.telephony.dataconnection;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
-import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
@@ -39,7 +38,6 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.SystemClock;
 import android.os.SystemProperties;
-import android.os.UserHandle;
 import android.provider.Settings;
 import android.provider.Telephony;
 import android.telephony.CellLocation;
@@ -55,7 +53,6 @@ import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneBase;
 import com.android.internal.telephony.DctConstants;
 import com.android.internal.telephony.EventLogTags;
-import com.android.internal.telephony.TelephonyIntents;
 import com.android.internal.telephony.gsm.GSMPhone;
 import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
 import com.android.internal.telephony.PhoneConstants;
@@ -240,7 +237,7 @@ public final class DcTracker extends DcTrackerBase {
     }
 
     private ApnContext addApnContext(String type) {
-        ApnContext apnContext = new ApnContext(mPhone.getContext(), type, LOG_TAG);
+        ApnContext apnContext = new ApnContext(type, LOG_TAG);
         apnContext.setDependencyMet(false);
         mApnContexts.put(type, apnContext);
         return apnContext;
@@ -378,16 +375,6 @@ public final class DcTracker extends DcTrackerBase {
             return apnContext.getState();
         }
         return DctConstants.State.FAILED;
-    }
-
-    // Return if apn type is a provisioning apn.
-    @Override
-    protected boolean isProvisioningApn(String apnType) {
-        ApnContext apnContext = mApnContexts.get(apnType);
-        if (apnContext != null) {
-            return apnContext.isProvisioningApn();
-        }
-        return false;
     }
 
     // Return state of overall
@@ -650,7 +637,7 @@ public final class DcTracker extends DcTrackerBase {
 
         if (apnContext == null ){
             if (DBG) log("trySetupData new apn context for type:" + type);
-            apnContext = new ApnContext(mPhone.getContext(), type, LOG_TAG);
+            apnContext = new ApnContext(type, LOG_TAG);
             mApnContexts.put(type, apnContext);
         }
         apnContext.setReason(reason);
@@ -1238,6 +1225,18 @@ public final class DcTracker extends DcTrackerBase {
         if (DBG) log("onDataStateChanged(ar): X");
     }
 
+    private void notifyDefaultData(ApnContext apnContext) {
+        if (DBG) {
+            log("notifyDefaultData: type=" + apnContext.getApnType()
+                + ", reason:" + apnContext.getReason());
+        }
+        apnContext.setState(DctConstants.State.CONNECTED);
+        // setState(DctConstants.State.CONNECTED);
+        mPhone.notifyDataConnection(apnContext.getReason(), apnContext.getApnType());
+        startNetStatPoll();
+        startDataStallAlarm(DATA_STALL_NOT_SUSPECTED);
+    }
+
     // TODO: For multiple Active APNs not exactly sure how to do this.
     @Override
     protected void gotoIdleAndNotifyDataConnection(String reason) {
@@ -1573,35 +1572,6 @@ public final class DcTracker extends DcTrackerBase {
         notifyOffApnsOfAvailability(null);
     }
 
-    @Override
-    protected void completeConnection(ApnContext apnContext) {
-        boolean isProvApn = apnContext.isProvisioningApn();
-
-        if (DBG) log("completeConnection: successful, notify the world apnContext=" + apnContext);
-
-        if (mIsProvisioning && !TextUtils.isEmpty(mProvisioningUrl)) {
-            if (DBG) {
-                log("completeConnection: MOBILE_PROVISIONING_ACTION url="
-                        + mProvisioningUrl);
-            }
-            Intent newIntent =
-                    new Intent(Intent.ACTION_VIEW, Uri.parse(mProvisioningUrl));
-            newIntent.setFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT |
-                    Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                mPhone.getContext().startActivity(newIntent);
-            } catch (ActivityNotFoundException e) {
-                loge("completeConnection: startActivityAsUser failed" + e);
-            }
-        }
-        mIsProvisioning = false;
-        mProvisioningUrl = null;
-
-        mPhone.notifyDataConnection(apnContext.getReason(), apnContext.getApnType());
-        startNetStatPoll();
-        startDataStallAlarm(DATA_STALL_NOT_SUSPECTED);
-    }
-
     /**
      * A SETUP (aka bringUp) has completed, possibly with an error. If
      * there is an error this method will call {@link #onDataSetupCompleteError}.
@@ -1675,52 +1645,7 @@ public final class DcTracker extends DcTrackerBase {
                 } else {
                     SystemProperties.set(PUPPET_MASTER_RADIO_STRESS_TEST, "false");
                 }
-
-                // A connection is setup
-                apnContext.setState(DctConstants.State.CONNECTED);
-                boolean isProvApn = apnContext.isProvisioningApn();
-                if ((!isProvApn) || mIsProvisioning) {
-                    // Complete the connection normally notifying the world we're connected.
-                    // We do this if this isn't a special provisioning apn or if we've been
-                    // told its time to provision.
-                    completeConnection(apnContext);
-                } else {
-                    // This is a provisioning APN that we're reporting as connected. Later
-                    // when the user desires to upgrade this to a "default" connection,
-                    // mIsProvisioning == true, we'll go through the code path above.
-                    // mIsProvisioning becomes true when CMD_ENABLE_MOBILE_PROVISIONING
-                    // is sent to the DCT.
-                    if (DBG) {
-                        log("onDataSetupComplete: successful, BUT send connected to prov apn as"
-                                + " mIsProvisioning:" + mIsProvisioning + " == false"
-                                + " && (isProvisioningApn:" + isProvApn + " == true");
-                    }
-
-                    Intent intent = new Intent(
-                            TelephonyIntents.ACTION_DATA_CONNECTION_CONNECTED_TO_PROVISIONING_APN);
-                    intent.putExtra(PhoneConstants.DATA_APN_KEY, apnContext.getApnSetting().apn);
-                    intent.putExtra(PhoneConstants.DATA_APN_TYPE_KEY, apnContext.getApnType());
-
-                    String apnType = apnContext.getApnType();
-                    LinkProperties linkProperties = getLinkProperties(apnType);
-                    if (linkProperties != null) {
-                        intent.putExtra(PhoneConstants.DATA_LINK_PROPERTIES_KEY, linkProperties);
-                        String iface = linkProperties.getInterfaceName();
-                        if (iface != null) {
-                            intent.putExtra(PhoneConstants.DATA_IFACE_NAME_KEY, iface);
-                        }
-                    }
-                    LinkCapabilities linkCapabilities = getLinkCapabilities(apnType);
-                    if (linkCapabilities != null) {
-                        intent.putExtra(PhoneConstants.DATA_LINK_CAPABILITIES_KEY, linkCapabilities);
-                    }
-
-                    mPhone.getContext().sendBroadcastAsUser(intent, UserHandle.ALL);
-                }
-                if (DBG) {
-                    log("onDataSetupComplete: SETUP complete type=" + apnContext.getApnType()
-                        + ", reason:" + apnContext.getReason());
-                }
+                notifyDefaultData(apnContext);
             }
         } else {
             cause = (DcFailCause) (ar.result);
