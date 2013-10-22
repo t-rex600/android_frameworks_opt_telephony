@@ -63,6 +63,7 @@ import com.android.internal.telephony.RILConstants;
 import com.android.internal.telephony.uicc.IccRecords;
 import com.android.internal.telephony.uicc.UiccController;
 import com.android.internal.util.AsyncChannel;
+import com.android.internal.util.Objects;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
