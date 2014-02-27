@@ -22,6 +22,7 @@ import android.os.Message;
 import android.os.Registrant;
 import android.os.RegistrantList;
 import android.os.SystemProperties;
+import android.telephony.DisconnectCause;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.ServiceState;
 import android.telephony.TelephonyManager;
@@ -119,7 +120,7 @@ public final class GsmCallTracker extends CallTracker {
                     // Since by now we are unregistered, we won't notify
                     // PhoneApp that the call is gone. Do that here
                     Rlog.d(LOG_TAG, "dispose: call connnection onDisconnect, cause LOST_SIGNAL");
-                    c.onDisconnect(Connection.DisconnectCause.LOST_SIGNAL);
+                    c.onDisconnect(DisconnectCause.LOST_SIGNAL);
                 }
             } catch (CallStateException ex) {
                 Rlog.e(LOG_TAG, "dispose: unexpected error on hangup", ex);
@@ -130,7 +131,7 @@ public final class GsmCallTracker extends CallTracker {
             if(mPendingMO != null) {
                 hangup(mPendingMO);
                 Rlog.d(LOG_TAG, "dispose: call mPendingMO.onDsiconnect, cause LOST_SIGNAL");
-                mPendingMO.onDisconnect(Connection.DisconnectCause.LOST_SIGNAL);
+                mPendingMO.onDisconnect(DisconnectCause.LOST_SIGNAL);
             }
         } catch (CallStateException ex) {
             Rlog.e(LOG_TAG, "dispose: unexpected error on hangup", ex);
@@ -226,7 +227,7 @@ public final class GsmCallTracker extends CallTracker {
             || mPendingMO.mAddress.indexOf(PhoneNumberUtils.WILD) >= 0
         ) {
             // Phone number is invalid
-            mPendingMO.mCause = Connection.DisconnectCause.INVALID_NUMBER;
+            mPendingMO.mCause = DisconnectCause.INVALID_NUMBER;
 
             // handlePollCalls() will notice this call not present
             // and will mark it as dropped.
@@ -605,11 +606,11 @@ public final class GsmCallTracker extends CallTracker {
 
             if (conn.isIncoming() && conn.getConnectTime() == 0) {
                 // Missed or rejected call
-                Connection.DisconnectCause cause;
-                if (conn.mCause == Connection.DisconnectCause.LOCAL) {
-                    cause = Connection.DisconnectCause.INCOMING_REJECTED;
+                int cause;
+                if (conn.mCause == DisconnectCause.LOCAL) {
+                    cause = DisconnectCause.INCOMING_REJECTED;
                 } else {
-                    cause = Connection.DisconnectCause.INCOMING_MISSED;
+                    cause = DisconnectCause.INCOMING_MISSED;
                 }
 
                 if (Phone.DEBUG_PHONE) {
@@ -618,8 +619,8 @@ public final class GsmCallTracker extends CallTracker {
                 }
                 mDroppedDuringPoll.remove(i);
                 hasAnyCallDisconnected |= conn.onDisconnect(cause);
-            } else if (conn.mCause == Connection.DisconnectCause.LOCAL
-                    || conn.mCause == Connection.DisconnectCause.INVALID_NUMBER) {
+            } else if (conn.mCause == DisconnectCause.LOCAL
+                    || conn.mCause == DisconnectCause.INVALID_NUMBER) {
                 mDroppedDuringPoll.remove(i);
                 hasAnyCallDisconnected |= conn.onDisconnect(conn.mCause);
             }
